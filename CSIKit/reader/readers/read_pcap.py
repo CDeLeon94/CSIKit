@@ -63,19 +63,14 @@ class PcapFrame:
 
         payloadHeader["magic_bytes"] = payload[:2]
 
-        if payload[:4] == b'\x11\x11\x11\x11':
-            # Device is running stock nexmon.
-            payloadHeader["rssi"] = -1
-            payloadHeader["frame_control"] = -1
-        else:
-            # Device is running mzakharo's PR.
-            payloadHeader["rssi"] = struct.unpack("b", payload[2:3])[0]
-            payloadHeader["frame_control"] = struct.unpack("B", payload[3:4])[0]
+        # Device is running mzakharo's PR.
+        payloadHeader["rssi"] = struct.unpack("b", payload[26:27])[0]
+        payloadHeader["frame_control"] = struct.unpack("B", payload[22:23])[0]
 
         payloadHeader["source_mac"] = stringops.hexToMACString(payload[4:10].hex())
-        payloadHeader["sequence_no"] = int.from_bytes(payload[10:12], byteorder="little")
+        payloadHeader["sequence_no"] = int.from_bytes(payload[24:26], byteorder="little")
 
-        coreSpatialBytes = payload[12:14]
+        coreSpatialBytes = payload[37:39]
         coreSpatialVal = int.from_bytes(coreSpatialBytes, byteorder="little")
 
         # First, we need to check whether the correct endianness is used here.
@@ -99,9 +94,9 @@ class PcapFrame:
         payloadHeader["core"] = int(coreSpatialBits[3:6], 2)
         payloadHeader["spatial_stream"] = int(coreSpatialBits[:3], 2)
 
-        payloadHeader["channel_spec"] = payload[14:16].hex()
+        payloadHeader["channel_spec"] = payload[39:41].hex()
        
-        chipIdentifier = payload[16:18].hex()
+        chipIdentifier = payload[42:44].hex()
         if chipIdentifier in PcapFrame.CHIPS:
             payloadHeader["chip"] = PcapFrame.CHIPS[chipIdentifier]
         else:
@@ -128,7 +123,7 @@ class PcapFrame:
             ints_size = incl_len
             payload = np.array(struct.unpack(ints_size*"B", payload_bytes), dtype=np.uint8)
 
-        self.payloadHeader = PcapFrame.read_payloadHeader(payload.tobytes()[42:64])
+        self.payloadHeader = PcapFrame.read_payloadHeader(payload.tobytes()[42:89])
         self.length += incl_len
 
         return payload
@@ -138,7 +133,7 @@ class Pcap:
     BW_40 = 40
     BW_20 = 20
 
-    HOFFSET = 16
+    HOFFSET = 42 #uncertain 
 
     NFFT_80 = int(BW_80*3.2)
     NFFT_40 = int(BW_40*3.2)
@@ -149,9 +144,13 @@ class Pcap:
         #Need to figure out what's causing this 26 byte discrepancy.
         1050: 80,
 
+        #Adding an exception for data from nexmonster's pi-5.4.51-plus, uncertain about the right number 
+        #178: 20,
+        #188: 20,
+
         NFFT_80*4: 80,
         NFFT_40*4: 40,
-        NFFT_20*4: 20
+        NFFT_20*4: 20  # 256
     }
 
     PCAP_HEADER_DTYPE = np.dtype([
@@ -192,15 +191,18 @@ class Pcap:
 
     def calculate_size(self, frame):
         if frame is None or frame.header is None or frame.payload is None or frame.payloadHeader is None:
-            # print("Incomplete pcap frame header found. Cannot parse any further frames.")
+            print("Incomplete pcap frame header found. Cannot parse any further frames.")
             # self.skipped_frames += 1
             return False
 
-        given_size = frame.header["orig_len"][0]-(self.HOFFSET-1)*4
+        #given_size = frame.header["orig_len"][0]-(self.HOFFSET-1)*4
+        #changed 
+        given_size = frame.header["orig_len"][0]-86
 
         # Checking if the frame size is valid for ANY bandwidth.
         if given_size not in self.BW_SIZES or frame.payload is None:
-            #print("Skipped frame with incorrect size.")
+            print("Skipped frame with incorrect size.")
+            print("given_size",given_size)
             self.skipped_frames += 1
             return False
 
@@ -312,7 +314,7 @@ class NEXBeamformReader(Reader):
 
         if chipType in ["4339", "43455c0"]:
             data.dtype = np.int16
-            data = data[30:]
+            data = data[43:] #Changed, added 26 to this offset, was 30
         elif chipType == "4358":
             data = data[15:15+int(bandwidth*3.2)]
             data = self.unpack_float(0, int(bandwidth*3.2), data)
@@ -374,8 +376,13 @@ class NEXBeamformReader(Reader):
             data = pcap_frame.payload
 
             if chipType in ["4339", "43455c0"]:
+                print("Data Len:",len(data))
+                print(data)
+                data = data[2:]
                 data.dtype = np.int16
-                data = data[30:]
+                print("Data Len:",len(data))
+                print(data)
+                data = data[44:] #Changed, added 26 to this offset
             elif chipType == "4358":
                 data = data[15:15 + int(bandwidth * 3.2)]
                 data = self.unpack_float(0, int(bandwidth * 3.2), data)
