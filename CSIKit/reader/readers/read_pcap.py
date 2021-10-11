@@ -27,6 +27,7 @@ class PcapFrame:
         "6500": "43455c0",
         "dca6": "43455c0",
 
+        "0300": "4358",
         "adde": "4358",
 
         "34e8": "4366c0", #Seen in data/nexmon/example_4366c0
@@ -245,7 +246,6 @@ class NEXBeamformReader(Reader):
             return byteops.unpack_float_acphy(10, 1, 0, 1, 9, 5, nfft, nfftx1)
         elif format == 1:
             return byteops.unpack_float_acphy(10, 1, 0, 1, 12, 6, nfft, nfftx1)
-            # return byteops.unpack_float_acphy(1, 12, 6, nfft, nfftx1)
 
     def read_stream(self, path: str, scaled: bool = False):
         self.chip = " UNKNOWN"
@@ -259,7 +259,7 @@ class NEXBeamformReader(Reader):
         for f in self.pcap.stream():
             ret_data = CSIData()
             ret_data.bandwidth = self.pcap.bandwidth
-            data = self.read_frame(f, scaled, ret_data.bandwidth)
+            data = self.read_frame(f, ret_data.bandwidth)
             ret_data.push_frame(data)
             ret_data.timestamps.append(data.timestamp)
             ret_data.set_backend("Nexmon CSI")
@@ -283,7 +283,7 @@ class NEXBeamformReader(Reader):
         ret_data.skipped_frames = self.pcap.skipped_frames
         ret_data.expected_frames = len(self.pcap.frames)+self.pcap.skipped_frames
 
-        data_frames = self.read_frames(self.pcap.frames, scaled, ret_data.bandwidth)
+        data_frames = self.read_frames(self.pcap.frames, ret_data.bandwidth)
         for frame in data_frames:
             if frame is not None:
                 ret_data.push_frame(frame)
@@ -415,10 +415,10 @@ class NEXBeamformReader(Reader):
 
         return NEXCSIFrame(payload_header, np.transpose(total_csi))
 
-    def read_frame(self, frame, scaled:bool, bandwidth: int):
+    def read_frame(self, frame, bandwidth: int):
         return self.read_bfee(frame, bandwidth)
 
-    def read_frames(self, frames: list, scaled: bool, bandwidth: int) -> list:
+    def read_frames(self, frames: list, bandwidth: int) -> list:
 
         # Check if sequence_no changes. If not, 1Rx/Tx stream.
         if frames[0].payloadHeader["sequence_no"] == frames[-1].payloadHeader["sequence_no"]:
