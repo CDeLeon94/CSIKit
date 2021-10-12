@@ -60,18 +60,24 @@ class PcapFrame:
     
     @staticmethod
     def read_payloadHeader(payload: bytes) -> dict:
+        print(payload.hex())
         payloadHeader = {}
 
         payloadHeader["magic_bytes"] = payload[:2]
 
         # Device is running mzakharo's PR.
-        payloadHeader["rssi"] = struct.unpack("b", payload[26:27])[0]
+        payloadHeader["rssi"] = struct.unpack("b", payload[26:27])[0] ## Did Sanity Check, these numbers are within expected range
         payloadHeader["frame_control"] = struct.unpack("B", payload[22:23])[0]
 
-        payloadHeader["source_mac"] = stringops.hexToMACString(payload[4:10].hex())
+
+        payloadHeader["reserved"] = np.array(struct.unpack("HHHHH",payload[30:40]), dtype=np.uint16) #Attempt at reading out the data that is in the "reserved" space, which I expect to be zeroed
+        print(payloadHeader["reserved"])
+        
+
+        payloadHeader["source_mac"] = stringops.hexToMACString(payload[10:16].hex())
         payloadHeader["sequence_no"] = int.from_bytes(payload[24:26], byteorder="little")
 
-        coreSpatialBytes = payload[37:39]
+        coreSpatialBytes = payload[40:42]
         coreSpatialVal = int.from_bytes(coreSpatialBytes, byteorder="little")
 
         # First, we need to check whether the correct endianness is used here.
@@ -93,11 +99,15 @@ class PcapFrame:
         # While I'm not entirely sure whether they mean core 0 or 1 (since 0b001 == 3),
         # we can
         payloadHeader["core"] = int(coreSpatialBits[3:6], 2)
+        print("core",payloadHeader["core"])
         payloadHeader["spatial_stream"] = int(coreSpatialBits[:3], 2)
+        print("spatial",payloadHeader["spatial_stream"])
 
-        payloadHeader["channel_spec"] = payload[39:41].hex()
+        payloadHeader["channel_spec"] = payload[41:42].hex()
+        print("chanspec",payload[41:42])
        
         chipIdentifier = payload[42:44].hex()
+        print("Chip ID",chipIdentifier)
         if chipIdentifier in PcapFrame.CHIPS:
             payloadHeader["chip"] = PcapFrame.CHIPS[chipIdentifier]
         else:
@@ -118,13 +128,14 @@ class PcapFrame:
             raise BufferError("Could not read payload")
 
         if (incl_len % 4) == 0:
+            print(incl_len, str(incl_len % 4))
             ints_size = int(incl_len / 4)
             payload = np.array(struct.unpack(ints_size*"I", payload_bytes), dtype=np.uint32)
         else:
             ints_size = incl_len
             payload = np.array(struct.unpack(ints_size*"B", payload_bytes), dtype=np.uint8)
 
-        self.payloadHeader = PcapFrame.read_payloadHeader(payload.tobytes()[42:89])
+        self.payloadHeader = PcapFrame.read_payloadHeader(payload.tobytes()[42:86])
         self.length += incl_len
 
         return payload
@@ -134,7 +145,7 @@ class Pcap:
     BW_40 = 40
     BW_20 = 20
 
-    HOFFSET = 42 #uncertain 
+    HOFFSET = 16 #uncertain 
 
     NFFT_80 = int(BW_80*3.2)
     NFFT_40 = int(BW_40*3.2)
@@ -146,7 +157,7 @@ class Pcap:
         1050: 80,
 
         #Adding an exception for data from nexmonster's pi-5.4.51-plus, uncertain about the right number 
-        #178: 20,
+        #282: 20,
         #188: 20,
 
         NFFT_80*4: 80,
@@ -196,9 +207,7 @@ class Pcap:
             # self.skipped_frames += 1
             return False
 
-        #given_size = frame.header["orig_len"][0]-(self.HOFFSET-1)*4
-        #changed 
-        given_size = frame.header["orig_len"][0]-86
+        given_size = frame.header["orig_len"][0]-(self.HOFFSET-1)*4
 
         # Checking if the frame size is valid for ANY bandwidth.
         if given_size not in self.BW_SIZES or frame.payload is None:
@@ -314,7 +323,7 @@ class NEXBeamformReader(Reader):
 
         if chipType in ["4339", "43455c0"]:
             data.dtype = np.int16
-            data = data[43:] #Changed, added 26 to this offset, was 30
+            data = data[56:]
         elif chipType == "4358":
             data = data[15:15+int(bandwidth*3.2)]
             data = self.unpack_float(0, int(bandwidth*3.2), data)
@@ -382,7 +391,7 @@ class NEXBeamformReader(Reader):
                 data.dtype = np.int16
                 print("Data Len:",len(data))
                 print(data)
-                data = data[44:] #Changed, added 26 to this offset
+                data = data[56:] #Changed, added 26 to this offset
             elif chipType == "4358":
                 data = data[15:15 + int(bandwidth * 3.2)]
                 data = self.unpack_float(0, int(bandwidth * 3.2), data)
